@@ -1,20 +1,8 @@
 ## consumer
 
-mutable struct PartitionList
-    rkparlist::Ptr{Cvoid}
-end
-
-function PartitionList()
-    ptr = kafka_topic_partition_list_new()
-    parlist = PartitionList(ptr)
-    finalizer(parlist -> kafka_topic_partition_list_destroy(ptr), parlist)
-    return parlist
-end
-
-
 mutable struct KafkaConsumer
     client::KafkaClient
-    parlist::PartitionList
+    rkparlist::Ptr{Cvoid}
 end
 
 
@@ -22,8 +10,10 @@ function KafkaConsumer(conf::Dict)
     @assert haskey(conf, "bootstrap.servers") "`bootstrap.servers` should be specified in conf"
     @assert haskey(conf, "group.id") "`group.id` should be specified in conf"
     client = KafkaClient(KAFKA_TYPE_CONSUMER, conf)
-    parlist = PartitionList()
-    return KafkaConsumer(client, parlist)
+    rkparlist = kafka_topic_partition_list_new()
+    consumer = KafkaConsumer(client, rkparlist)
+    finalizer(c -> kafka_topic_partition_list_destroy(c.rkparlist), consumer)
+    return consumer
 end
 
 
@@ -42,7 +32,7 @@ end
 
 
 function subscribe(c::KafkaConsumer, topic_partitions::Vector{Tuple{String, Int}})
-    rkparlist = c.parlist.rkparlist
+    rkparlist = c.rkparlist
     for (topic, partition) in topic_partitions
         kafka_topic_partition_list_add(rkparlist, topic, partition)
     end
@@ -64,3 +54,15 @@ end
 
 
 poll(c::KafkaConsumer, timeout::Int=1000) = poll(Vector{UInt8}, Vector{UInt8}, c, timeout)
+
+function seek(c::KafkaConsumer,
+              topic_partition::Tuple{String, Integer},
+              offset::Integer,
+              timeout::Integer=1000)
+    topic, par = topic_partition
+    if !kafka_topic_partition_list_find(c.rkparlist, topic, par)
+        error("Seek on an assigned/subscribed topic partition $topic_partition")
+    end
+    kt = KafkaTopic(c.client, topic)
+    kafka_seek(kt.rkt, par, offset, timeout)
+end

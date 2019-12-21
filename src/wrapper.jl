@@ -110,7 +110,7 @@ function kafka_poll(rk::Ptr{Cvoid}, timeout::Integer)
     return ccall((:rd_kafka_poll, LIBRDKAFKA), Cint,
                  (Ptr{Cvoid}, Cint),
                  rk, timeout)
-    
+
 end
 
 
@@ -125,14 +125,14 @@ function produce(rkt::Ptr{Cvoid}, partition::Integer,
                     rkt, Int32(partition), flags,
                     pointer(payload), length(payload),
                     pointer(key), length(key),
-                    C_NULL)   
+                    C_NULL)
 
     if errcode != 0
         #error("Produce request failed with error code (unix): $errcode")
         ## errno is c global var
 	errnr = unsafe_load(cglobal(:errno, Int32))
         errmsg = unsafe_string(ccall(:strerror, Cstring, (Int32,), errnr))
-        error("Produce request failed with error code: $errmsg")  
+        error("Produce request failed with error code: $errmsg")
     end
 end
 
@@ -158,6 +158,13 @@ function kafka_topic_partition_list_add(rkparlist::Ptr{Cvoid},
           (Ptr{Cvoid}, Cstring, Int32,), rkparlist, topic, partition)
 end
 
+function kafka_topic_partition_list_find(rkparlist::Ptr{Cvoid},
+	                                     topic::String, partition::Integer)
+    ptr = ccall((:rd_kafka_topic_partition_list_find, LIBRDKAFKA), Ptr{Cvoid},
+	            (Ptr{Cvoid}, Cstring, Int32), rkparlist, topic, partition)
+	return ptr != C_NULL
+end
+
 
 ## partition assignment
 
@@ -168,7 +175,7 @@ function kafka_assignment(rk::Ptr{Cvoid}, rkparlist::Ptr{Cvoid})
         error("Assignment retrieval failed with error $errcode")
     end
 end
-    
+
 
 ## subscribe
 
@@ -202,10 +209,21 @@ function kafka_consumer_poll(rk::Ptr{Cvoid}, timeout::Integer)
     else
         return nothing
     end
-        
+
 end
 
 
 function kafka_message_destroy(msg_ptr::Ptr{CKafkaMessage})
     ccall((:rd_kafka_message_destroy, LIBRDKAFKA), Cvoid, (Ptr{Cvoid},), msg_ptr)
+end
+
+function kafka_seek(rk::Ptr{Cvoid}, partition::Integer, offset::Integer, timeout::Integer)
+	errcode = ccall((:rd_kafka_seek, LIBRDKAFKA), Cint,
+	                (Ptr{Cvoid}, Cint,      Clong,  Cint),
+					rk,          partition, offset, timeout)
+	if errcode !== 0
+		errnr = unsafe_load(cglobal(:errno, Int32))
+		errmsg = unsafe_string(ccall(:strerror, Cstring, (Int32,), errnr))
+		error("Produce request failed with error code: $errmsg")
+	end
 end
