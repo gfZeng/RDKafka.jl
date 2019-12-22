@@ -2,4 +2,6 @@ using RDKafka
 using Test
 
 # write your own tests here
-@test 1 == 1
+@testset "RDKafka" begin
+    include("consumer.jl")
+end

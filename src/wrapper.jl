@@ -1,6 +1,15 @@
 ## wrapper for librdkafka C API, see:
 ## https://github.com/edenhill/librdkafka/blob/master/src/rdkafka.h
 
+
+function errorif(errcode::Cint)
+	if !iszero(errcode)
+		errnr = unsafe_load(cglobal(:errno, Int32))
+		errmsg = unsafe_string(ccall(:strerror, Cstring, (Int32,), errnr))
+		error("Produce request failed with error code $errcode: $errmsg")
+	end
+end
+
 ## rd_kafka_conf_t
 
 function kafka_conf_new()
@@ -126,14 +135,7 @@ function produce(rkt::Ptr{Cvoid}, partition::Integer,
                     pointer(payload), length(payload),
                     pointer(key), length(key),
                     C_NULL)
-
-    if errcode != 0
-        #error("Produce request failed with error code (unix): $errcode")
-        ## errno is c global var
-	errnr = unsafe_load(cglobal(:errno, Int32))
-        errmsg = unsafe_string(ccall(:strerror, Cstring, (Int32,), errnr))
-        error("Produce request failed with error code: $errmsg")
-    end
+	errorif(errcode)
 end
 
 
@@ -168,12 +170,17 @@ end
 
 ## partition assignment
 
+function kafka_assign(rk::Ptr{Cvoid}, rkparlist:: Ptr{Cvoid})
+	errcode = ccall((:rd_kafka_assign, LIBRDKAFKA), Cint,
+	          (Ptr{Cvoid}, Ptr{Cvoid}),
+		      rk, rkparlist)
+    errorif(errcode)
+end
+
 function kafka_assignment(rk::Ptr{Cvoid}, rkparlist::Ptr{Cvoid})
     errcode = ccall((:rd_kafka_assignment, LIBRDKAFKA), Cint,
                     (Ptr{Cvoid}, Ptr{Cvoid}), rk, rkparlist)
-    if errcode != 0
-        error("Assignment retrieval failed with error $errcode")
-    end
+	errorif(errcode)
 end
 
 
@@ -182,9 +189,7 @@ end
 function kafka_subscribe(rk::Ptr{Cvoid}, rkparlist::Ptr{Cvoid})
     errcode = ccall((:rd_kafka_subscribe, LIBRDKAFKA), Cint,
                     (Ptr{Cvoid}, Ptr{Cvoid}), rk, rkparlist)
-    if errcode != 0
-        error("Subscription failed with error $errcode")
-    end
+	errorif(errcode)
 end
 
 
@@ -217,13 +222,20 @@ function kafka_message_destroy(msg_ptr::Ptr{CKafkaMessage})
     ccall((:rd_kafka_message_destroy, LIBRDKAFKA), Cvoid, (Ptr{Cvoid},), msg_ptr)
 end
 
+nowms() = round(Int, time() * 1000)
+
 function kafka_seek(rk::Ptr{Cvoid}, partition::Integer, offset::Integer, timeout::Integer)
-	errcode = ccall((:rd_kafka_seek, LIBRDKAFKA), Cint,
-	                (Ptr{Cvoid}, Cint,      Clong,  Cint),
-					rk,          partition, offset, timeout)
-	if errcode !== 0
-		errnr = unsafe_load(cglobal(:errno, Int32))
-		errmsg = unsafe_string(ccall(:strerror, Cstring, (Int32,), errnr))
-		error("Produce request failed with error code: $errmsg")
+	expire = nowms() + timeout
+	while true
+		errcode = ccall((:rd_kafka_seek, LIBRDKAFKA), Cint,
+		                (Ptr{Cvoid}, Cint,      Clong,  Cint),
+		                rk,          partition, offset, timeout)
+
+		if errcode in (-190, -172) && nowms() < expire
+			 sleep(1)
+			 continue
+		end
+        errorif(errcode)
+		break
 	end
 end
